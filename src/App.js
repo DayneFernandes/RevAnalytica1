@@ -1,9 +1,13 @@
-import React, { useState, useEffect } from 'react';
-import { Bar } from 'react-chartjs-2';
-import './style.css';
-import './App.css';
-import moment from 'moment';
+import React, { useState, useEffect, useRef } from 'react';
 import { Bar, Doughnut } from 'react-chartjs-2';
+import ChartDataLabels from 'chartjs-plugin-datalabels';
+import moment from 'moment';
+import './App.css';
+import 'chartjs-plugin-datalabels';
+import Chart from 'chart.js/auto';
+
+Chart.register(ChartDataLabels);
+
 
 
 function parseCustomDate(dateStr) {
@@ -22,36 +26,44 @@ function parseCustomDate(dateStr) {
   return moment(`${year}-${month}-${day}`, 'YYYY-MM-DD');
 }
 
-
-
-
 export default function App() {
   const [data, setData] = useState([]);
   const [eligibleHotels, setEligibleHotels] = useState([]);
   const [selectedHotels, setSelectedHotels] = useState([]);
   const [showDropdown, setShowDropdown] = useState(false);
-  const [selectAll, setSelectAll] = useState(true); // New state for select all
+  const [selectAll, setSelectAll] = useState(true); 
   const [marketShareData, setMarketShareData] = useState([]);
+  const doughnutRef = useRef(null);
+  const [legendHtml, setLegendHtml] = useState(null);
+  const [occupancyData, setOccupancyData] = useState([]);
 
   useEffect(() => {
     fetch('https://www.mfamanagement.co.in/eligible_hotels')
       .then(response => response.json())
       .then(hotels => {
-        setEligibleHotels(hotels.sort()); // Sort alphabetically
-        setSelectedHotels(hotels); // Initially select all hotels
+        setEligibleHotels(hotels.sort());
+        setSelectedHotels(hotels);
       })
       .catch(error => console.error("Error fetching eligible hotels:", error));
-}, []); // Empty dependency array
+  }, []);
 
-// This useEffect is for fetching market graph data whenever selectedHotels changes.
-useEffect(() => {
+  useEffect(() => {
     fetchMarketGraphData();
-}, [selectedHotels]);// Add selectedHotels as a dependency
+  }, [selectedHotels]);
+
+  useEffect(() => {
+    // Fetch day-to-day occupancy data
+    fetch('https://summerville.pythonanywhere.com/daily_occupancy')
+      .then(response => response.json())
+      .then(data => {
+        setOccupancyData(data);
+      })
+      .catch(error => console.error("Error fetching occupancy data:", error));
+  }, []);
+
 
   const fetchMarketGraphData = () => {
-    const hotelsString = selectedHotels.join('|');  // Convert the array to a string
-      // Log the string
-
+    const hotelsString = selectedHotels.join('|');
     fetch(`https://www.mfamanagement.co.in/market_graph1?hotels=${hotelsString}`)
       .then(response => response.json())
       .then(fetchedData => {
@@ -61,7 +73,6 @@ useEffect(() => {
       .catch(error => {
         console.error("Error fetching data:", error);
       });
-
   };
 
   useEffect(() => {
@@ -71,26 +82,46 @@ useEffect(() => {
             setMarketShareData(data);
         })
         .catch(error => console.error("Error fetching market share data:", error));
-}, []);
+  }, []);
 
-const generateDoughnutChartData = () => {
-  return {
-      labels: Object.keys(marketShareData),
-      datasets: [{
-          data: Object.values(marketShareData),
-          backgroundColor: [
-              // Add an array of colors here for each hotel.
-              // You can use any color palette or generate colors dynamically.
-              'rgba(255, 99, 132, 0.6)',
-              'rgba(54, 162, 235, 0.6)',
-              'rgba(255, 206, 86, 0.6)',
-              // ... add more colors for other hotels
-          ]
-      }]
+  const occupancyPercentages = occupancyData.map(d => d.Occupancy);
+  const occupancyDates = occupancyData.map(d => parseCustomDate(d.Date.toString()).format('YYYY-MM-DD'));
+
+
+
+
+  const generateDoughnutChartData = () => {
+    const totalReviews = Object.values(marketShareData).reduce((acc, val) => acc + val, 0);
+    const sortedHotels = Object.entries(marketShareData)
+        .map(([hotel, count]) => [hotel, (count / totalReviews) * 100])
+        .sort((a, b) => b[1] - a[1]);
+
+    const topHotels = [];
+    const topHotelsData = [];
+    let accumulatedPercentage = 0;
+    for (let [hotel, percentage] of sortedHotels) {
+        if (accumulatedPercentage < 70) {
+            topHotels.push(hotel);
+            topHotelsData.push(percentage);
+            accumulatedPercentage += percentage;
+        } else {
+            break;
+        }
+    }
+    const otherPercentage = 100 - accumulatedPercentage;
+    return {
+        labels: [...topHotels, 'Others'],
+        datasets: [{
+            data: [...topHotelsData, otherPercentage],
+            backgroundColor: [
+                'rgba(255, 99, 132, 0.6)',
+                'rgba(54, 162, 235, 0.6)',
+                'rgba(255, 206, 86, 0.6)',
+                'rgba(75, 192, 192, 0.6)'
+            ]
+        }]
+    };
   };
-};
-
-
 
   const handleHotelSelection = (action) => {
     if (action === "selectAll") {
@@ -106,13 +137,12 @@ const generateDoughnutChartData = () => {
             setSelectedHotels(prevHotels => [...prevHotels, action]);
         }
     }
-};
-
+  };
 
   const toggleDropdown = () => {
     setShowDropdown(!showDropdown);
   };
-  // ... (rest of your chartData, chartOptions, and rendering logic remains the same)
+
   const chartData = {
     labels: data.map(d => d.date),
     datasets: [
@@ -129,7 +159,7 @@ const generateDoughnutChartData = () => {
         borderColor: 'blue',
         fill: false,
         borderDash: [5, 5],
-        pointRadius: 6,  // This will make the dot bigger
+        pointRadius: 6,
         pointBackgroundColor: 'blue'
       },
       {
@@ -145,47 +175,32 @@ const generateDoughnutChartData = () => {
         showLine: false
       }
     ]
-};
-
-  
-
-
-  // Determine the maximum value from all datasets
-  const maxVal = Math.max(
-    ...data.map(d => d.min),
-    ...data.map(d => d.max),
-    ...data.map(d => d.my_price)
-  );
-
-  // Set the y-axis max value to be 10% higher than the maximum value
-  const yAxisMax = maxVal + (0.10 * maxVal);
+  };
 
   const chartOptions = {
     responsive: true,
     scales: {
-      x: {
-        type: 'category',
-        
-        
-        
-      },
-      y: {
+      x: { type: 'category' },
+      y: { 
         type: 'linear',
         title: {
           display: true,
-          text: 'INR'  // This sets the Y-axis title to "INR"
-        },
-        
+          text: 'INR'
+        }
       },
     },
     plugins: {
+      datalabels: {
+        formatter: (value, context) => `${value}%`,
+        color: '#fff',
+      },
       legend: {
         position: 'top',
         align: 'end', 
       },
       title: {
         display: true,
-        text: 'Market Overview' // Updated chart title
+        text: 'Market Overview'
       },
       tooltip: {
         callbacks: {
@@ -200,13 +215,13 @@ const generateDoughnutChartData = () => {
             const medianPrice = data[dataIndex].median;
 
             switch (context.datasetIndex) {
-              case 0: // Bar (Price Range)
+              case 0:
                 return [
                   `My Hotel Price: ${myPrice}`,
                   `Price Range: ${minPrice}-${maxPrice}`,
                   `Median Price: ${medianPrice}`
                 ];
-              case 1: // Line (My Hotel Price)
+              case 1:
                 return `My Hotel Price: ${myPrice}`;
               default:
                 return '';
@@ -217,47 +232,102 @@ const generateDoughnutChartData = () => {
     }
   };
 
-  
   return (
-    <div>
-      <h1 className="title">RevAnalytica</h1>
-      <div className="dropdown">
-        <button onClick={toggleDropdown}>Select Hotels</button>
-        {showDropdown && (
-          <div className="dropdown-content">
-            <div>
-              <input
-                type="checkbox"
-                checked={selectAll}
-                onChange={() => handleHotelSelection("selectAll")}
-              />
-              Select All
+    <div className="app-container">
+        <div className="title-container">
+            <h1 className="header-title">RevAnalytica</h1>
+            <div className="dropdown">
+                <button onClick={toggleDropdown}>Select Hotels</button>
+                {showDropdown && (
+                    <div className="dropdown-content">
+                        <div>
+                            <input
+                                type="checkbox"
+                                checked={selectAll}
+                                onChange={() => handleHotelSelection("selectAll")}
+                            />
+                            Select All
+                        </div>
+                        <div>
+                            <input
+                                type="checkbox"
+                                checked={!selectAll}
+                                onChange={() => handleHotelSelection("unselectAll")}
+                            />
+                            Unselect All
+                        </div>
+                        {eligibleHotels.map(hotel => (
+                            <div key={hotel}>
+                                <input
+                                    type="checkbox"
+                                    checked={selectedHotels.includes(hotel)}
+                                    onChange={() => handleHotelSelection(hotel)}
+                                />
+                                {hotel}
+                            </div>
+                        ))}
+                        <button onClick={fetchMarketGraphData}>Update Chart</button>
+                    </div>
+                )}
             </div>
-            <div>
-              <input
-                type="checkbox"
-                checked={!selectAll}
-                onChange={() => handleHotelSelection("unselectAll")}
-              />
-              Unselect All
-            </div>
-            {eligibleHotels.map(hotel => (
-              <div key={hotel}>
-                <input
-                  type="checkbox"
-                  checked={selectedHotels.includes(hotel)}
-                  onChange={() => handleHotelSelection(hotel)}
+        </div>
+  
+        <div className="content-container">
+            <div className="chart-container">
+                <div className="market-share-title">Market Share Last Week</div>
+                <Doughnut
+                    ref={doughnutRef}
+                    className="smallDoughnut"
+                    data={generateDoughnutChartData()}
+                    options={{
+                        plugins: {
+                            datalabels: {
+                                formatter: (value, context) => {
+                                    const label = context.chart.data.labels[context.dataIndex];
+                                    return ` ${Math.round(value)}%`;
+                                },
+                                color: '#000',
+                                align: 'end',
+                                offset: 10,
+                            },
+                            legend: {
+                                display: false,
+                            },
+                        },
+                    }}
+                    onData={() => {
+                        if (doughnutRef.current && doughnutRef.current.chartInstance) {
+                            const generatedLegend = doughnutRef.current.chartInstance.generateLegend();
+                            setLegendHtml(generatedLegend);
+                        }
+                    }}
+                    onUpdate={() => {
+                        if (doughnutRef.current) {
+                            const generatedLegend = doughnutRef.current.chartInstance.generateLegend();
+                            setLegendHtml(generatedLegend);
+                        }
+                    }}
                 />
-                {hotel}
-              </div>
-            ))}
-            <button onClick={fetchMarketGraphData}>Update Chart</button>
-
-          </div>
-        )}
-      </div>
-      <Bar key={selectedHotels.join('|')} data={chartData} options={chartOptions} />
-      <Doughnut data={generateDoughnutChartData()} />
+                <div className="scrollableLegend" dangerouslySetInnerHTML={{ __html: legendHtml }} />
+                <div className="bar-chart-container">
+                    <Bar
+                        key={selectedHotels.join('|')}
+                        data={chartData}
+                        options={chartOptions}
+                    />
+                    <div className="occupancy-container" style={{ display: 'flex', justifyContent: 'space-between', flexDirection: 'row' }}>
+                    {occupancyPercentages.map((perc, index) => (
+                        <span key={index}>{perc}%</span>
+                    ))}
+                </div>
+                </div>
+            </div>
+        </div>
     </div>
-  );
+);
+
+
+  
+  
+
 }
