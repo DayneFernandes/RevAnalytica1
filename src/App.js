@@ -3,6 +3,8 @@ import { Bar } from 'react-chartjs-2';
 import './style.css';
 import './App.css';
 import moment from 'moment';
+import { Bar, Doughnut } from 'react-chartjs-2';
+
 
 function parseCustomDate(dateStr) {
   let month, day, year;
@@ -29,6 +31,7 @@ export default function App() {
   const [selectedHotels, setSelectedHotels] = useState([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const [selectAll, setSelectAll] = useState(true); // New state for select all
+  const [marketShareData, setMarketShareData] = useState([]);
 
   useEffect(() => {
     fetch('https://www.mfamanagement.co.in/eligible_hotels')
@@ -60,6 +63,34 @@ useEffect(() => {
       });
 
   };
+
+  useEffect(() => {
+    fetch('https://summerville.pythonanywhere.com/get_market_share')
+        .then(response => response.json())
+        .then(data => {
+            setMarketShareData(data);
+        })
+        .catch(error => console.error("Error fetching market share data:", error));
+}, []);
+
+const generateDoughnutChartData = () => {
+  return {
+      labels: Object.keys(marketShareData),
+      datasets: [{
+          data: Object.values(marketShareData),
+          backgroundColor: [
+              // Add an array of colors here for each hotel.
+              // You can use any color palette or generate colors dynamically.
+              'rgba(255, 99, 132, 0.6)',
+              'rgba(54, 162, 235, 0.6)',
+              'rgba(255, 206, 86, 0.6)',
+              // ... add more colors for other hotels
+          ]
+      }]
+  };
+};
+
+
 
   const handleHotelSelection = (action) => {
     if (action === "selectAll") {
@@ -226,7 +257,7 @@ useEffect(() => {
         )}
       </div>
       <Bar key={selectedHotels.join('|')} data={chartData} options={chartOptions} />
-    
+      <Doughnut data={generateDoughnutChartData()} />
     </div>
   );
 }
